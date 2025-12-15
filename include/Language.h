@@ -2,8 +2,9 @@
 #define OPERATION_H
 
 enum IsCustomOp {
-    NonCustomOp = 0,
-    CustomOp    = 1
+    PseudoOp    = -1,
+    NonCustomOp =  0,
+    CustomOp    =  1
 };
 
 enum NumberOfParams {
@@ -27,10 +28,11 @@ enum NumberOfParams {
     macros( "while",   OP_WHILE,        CustomOp,    1 ) \
     macros( "func",    OP_FUNC,         NonCustomOp, 0 ) \
     macros( "call",    OP_CALL,         NonCustomOp, 0 ) \
-    macros( "(",       OP_OPEN_PARENT,  NonCustomOp, 0 ) \
-    macros( ")",       OP_CLOSE_PARENT, NonCustomOp, 0 ) \
-    macros( "{",       OP_OPEN_BRACE,   NonCustomOp, 0 ) \
-    macros( "}",       OP_CLOSE_BRACE,  NonCustomOp, 0 ) 
+    macros( "(",       OP_OPEN_PARENT,  PseudoOp,    0 ) \
+    macros( ")",       OP_CLOSE_PARENT, PseudoOp,    0 ) \
+    macros( "{",       OP_OPEN_BRACE,   PseudoOp,    0 ) \
+    macros( "}",       OP_CLOSE_BRACE,  PseudoOp,    0 ) \
+    macros( ";",       OP_SEMICOLON,    PseudoOp,    0 )
 
     
 #endif

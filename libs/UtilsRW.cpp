@@ -42,7 +42,7 @@ char* ReadToBuffer( const char* filename ) {
     assert( file && "Error opening file" );
 
     size_t result_of_read = fread( buffer, sizeof( char ), ( size_t ) file_size, file );
-    assert( result_of_read != 0 && "Fail read to buffer \n" );
+    assert( result_of_read != 0 && "Fail read to buffer" );
 
     int result_of_fclose = fclose( file );
     if ( result_of_fclose ) {
