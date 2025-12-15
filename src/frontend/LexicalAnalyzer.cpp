@@ -71,51 +71,51 @@ static Node_t *ReadToken( const char **pos ) {
     return NULL;
 }
 
-Node_t **LexicalAnalyze( const char *input, size_t *out_count ) {
-    if ( !input || !out_count ) {
-        if ( out_count )
-            *out_count = 0;
+Node_t **LexicalAnalyze( Parser_t *parser ) {
+    if ( !parser || !parser->buffer ) {
         return NULL;
     }
 
-    *out_count = 0;
+    size_t token_count = 0;
     size_t capacity = 16;
     Node_t **tokens = (Node_t **)calloc( capacity, sizeof( Node_t * ) );
     if ( !tokens ) {
-        *out_count = 0;
         return NULL;
     }
 
-    const char *pos = input;
+    const char *pos = parser->buffer;
     while ( *pos ) {
         Node_t *token = ReadToken( &pos );
         if ( !token ) {
-            for ( size_t i = 0; i < *out_count; i++ ) {
+            for ( size_t i = 0; i < token_count; i++ ) {
                 if ( tokens[i] )
                     NodeDelete( tokens[i], NULL, NULL );
             }
             free( tokens );
-            *out_count = 0;
             return NULL;
         }
 
-        if ( *out_count >= capacity ) {
+        if ( token_count >= capacity ) {
             capacity *= 2;
             Node_t **new_tokens = (Node_t **)realloc( tokens, capacity * sizeof( Node_t * ) );
             if ( !new_tokens ) {
-                for ( size_t i = 0; i < *out_count; i++ ) {
+                for ( size_t i = 0; i < token_count; i++ ) {
                     if ( tokens[i] )
                         NodeDelete( tokens[i], NULL, NULL );
                 }
                 free( tokens );
-                *out_count = 0;
                 return NULL;
             }
             tokens = new_tokens;
         }
 
-        tokens[( *out_count )++] = token;
+        tokens[token_count++] = token;
     }
+
+    // Store tokens in parser structure
+    parser->tokens.data = tokens;
+    parser->tokens.size = token_count;
+    parser->tokens.capacity = capacity;
 
     return tokens;
 }
