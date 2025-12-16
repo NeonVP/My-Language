@@ -34,17 +34,13 @@ void Parse( Parser_t* parser );
 
 // Lexical analyzer
 Node_t **LexicalAnalyze( Parser_t* parser );
-void FreeTokenArray( Node_t **tokens, size_t count );
 
 // Syntax analyzer
-// Node_t **SyntaxAnalyze()
+Node_t *SyntaxAnalyze( Parser_t* parser );
 
 #ifdef _DEBUG
 void ParserDump( Parser_t *parser, const char *format_string, ... );
 #endif
-
-void TreeSaveToFile( const Tree_t *tree, const char *filename );
-Tree_t *TreeReadFromBuffer( char *buffer );
 
 TreeData_t MakeNumber( int number );
 TreeData_t MakeOperation( OperationType operation );

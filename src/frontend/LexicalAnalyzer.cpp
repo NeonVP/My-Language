@@ -143,14 +143,3 @@ Node_t **LexicalAnalyze( Parser_t *parser ) {
 
     return tokens.data;
 }
-
-void FreeTokenArray( Node_t **tokens, size_t count ) {
-    if ( !tokens )
-        return;
-    for ( size_t i = 0; i < count; i++ ) {
-        if ( tokens[i] ) {
-            NodeDelete( tokens[i], NULL, NULL );
-        }
-    }
-    free( tokens );
-}

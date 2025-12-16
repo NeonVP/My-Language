@@ -293,3 +293,56 @@ static void NodeBondInitDot( const Node_t *node, FILE *dot_stream ) {
 }
 
 #undef DOT_PRINT
+
+static void NodeSaveRecursively( const Node_t *node, FILE *file_stream ) {
+    if ( node == NULL ) {
+        fprintf( file_stream, "nil" );
+        return;
+    }
+
+    fprintf( file_stream, "(" );
+
+    switch ( node->value.type ) {
+        case NODE_NUMBER:
+            fprintf( file_stream, "%d", node->value.data.number );
+            break;
+        case NODE_VARIABLE:
+            fprintf( file_stream, "\"%s\"", node->value.data.variable );
+            break;
+        case NODE_OPERATION:
+            fprintf( file_stream, "%s", operations_txt[node->value.data.operation] );
+            break;
+        case NODE_UNKNOWN:
+        default:
+            fprintf( file_stream, "?" );
+            break;
+    }
+
+    if ( node->left || node->right ) {
+        fprintf( file_stream, " " );
+        NodeSaveRecursively( node->left, file_stream );
+        fprintf( file_stream, " " );
+        NodeSaveRecursively( node->right, file_stream );
+    }
+
+    fprintf( file_stream, ")" );
+}
+
+
+void TreeSaveToFile( const Tree_t *tree, const char *filename ) {
+    if ( !tree || !filename ) {
+        PRINT_ERROR( "Null pointer on `tree` or `filename`" );
+        return;
+    }
+
+    FILE *file_stream = fopen( filename, "w" );
+    if ( !file_stream ) {
+        PRINT_ERROR( "Fail to open file `%s`", filename );
+        return;
+    }
+
+    NodeSaveRecursively( tree->root, file_stream );
+
+    fclose( file_stream );
+}
+

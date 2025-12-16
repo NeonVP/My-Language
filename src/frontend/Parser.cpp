@@ -114,6 +114,7 @@ void ParserDtor( Parser_t **parser ) {
     ON_DEBUG( DumpDtor( &( ( *parser )->logging ) ); )
     TokenArrayDestroy( &( ( *parser )->tokens ) );
 
+    free( ( *parser )->tree );
     free( ( *parser )->input_filename );
     free( ( *parser )->output_filename );
 
@@ -129,11 +130,13 @@ void Parse( Parser_t *parser ) {
         return;
     }
 
-    // size_t index = 0;
-    // Node_t *root = GetProgram( parser, &index );
+    Node_t *root = SyntaxAnalyze( parser );
 
     parser->tree = TreeCtor();
-    // parser->tree->root = root;
+    parser->tree->root = root;
+
+    PRINT( "root = %p", parser->tree->root );
+    ParserDump( parser, "After pasring my code" );
 }
 
 #ifdef _DEBUG
