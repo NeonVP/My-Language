@@ -89,13 +89,6 @@ Parser_t *ParserCtor( int argc, char **argv ) {
     PRINT( "Input file  = `%s`", parser->input_filename );
     PRINT( "Output file = `%s`", parser->output_filename );
 
-    parser->buffer = ReadToBuffer( parser->input_filename );
-    if ( !parser->buffer ) {
-        PRINT_ERROR( "Fail to read source from file `%s`", parser->input_filename );
-        return NULL;
-    }
-    PRINT( "Succesful reading to buffer" );
-
     ON_DEBUG( DumpCtor( &( parser->logging ) ) );
 
     return parser;
@@ -119,16 +112,29 @@ void ParserDtor( Parser_t **parser ) {
     my_assert( parser && *parser, "Null pointer on `parse`" );
 
     ON_DEBUG( DumpDtor( &( ( *parser )->logging ) ); )
+    TokenArrayDestroy( &( ( *parser )->tokens ) );
 
     free( ( *parser )->input_filename );
     free( ( *parser )->output_filename );
-    free( ( *parser )->buffer );
 
     free( *parser );
     *parser = NULL;
 }
 
-void Parse( Parser_t *parser ) { my_assert( parser, "Null pointer on `parser`" ); }
+void Parse( Parser_t *parser ) {
+    my_assert( parser, "Null pointer on `parser`" );
+
+    if ( !LexicalAnalyze( parser ) ) {
+        PRINT_ERROR( "Lexical analysis failed" );
+        return;
+    }
+
+    // size_t index = 0;
+    // Node_t *root = GetProgram( parser, &index );
+
+    parser->tree = TreeCtor();
+    // parser->tree->root = root;
+}
 
 #ifdef _DEBUG
 #define PRINT_HTML( fmt, ... ) fprintf( parser->logging.log_file, fmt, ##__VA_ARGS__ );

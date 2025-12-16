@@ -24,10 +24,10 @@
         struct tm *timeinfo;                                                                                 \
         time( &rawtime );                                                                                    \
         timeinfo = localtime( &rawtime );                                                                    \
-        char buffer[20];                                                                                     \
-        strftime( buffer, sizeof( buffer ), "%H:%M:%S", timeinfo );                                          \
+        char time_buffer[20];                                                                                     \
+        strftime( time_buffer, sizeof( time_buffer ), "%H:%M:%S", timeinfo );                                          \
         fprintf( stderr, "[%s] [%s:%d] [%s] " COLOR_CYAN "[DEBUG]" COLOR_RESET " " str "\n" COLOR_RESET,     \
-                 buffer, __FILE__, __LINE__, __func__, ##__VA_ARGS__ );                                      \
+                 time_buffer, __FILE__, __LINE__, __func__, ##__VA_ARGS__ );                                      \
     } while ( 0 )
 
 #define ON_DEBUG( ... ) __VA_ARGS__

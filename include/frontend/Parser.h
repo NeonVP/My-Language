@@ -2,13 +2,7 @@
 #define FRONTEND_H
 
 #include "Tree.h"
-
-struct TokenArray_t {
-    Node_t** data;
-
-    size_t size;
-    size_t capacity;
-};
+#include "frontend/TokenArray.h"
 
 #ifdef _DEBUG
 struct Log_t {
@@ -23,10 +17,7 @@ struct Log_t {
 struct Parser_t {
     TokenArray_t tokens;
 
-    char*  buffer;
-
     Tree_t* tree;
-
 
     char* input_filename;
     char* output_filename;  
@@ -55,9 +46,9 @@ void ParserDump( Parser_t *parser, const char *format_string, ... );
 void TreeSaveToFile( const Tree_t *tree, const char *filename );
 Tree_t *TreeReadFromBuffer( char *buffer );
 
-TreeData_t MakeNumber( double number );
+TreeData_t MakeNumber( int number );
 TreeData_t MakeOperation( OperationType operation );
-TreeData_t MakeVariable( char variable );
+TreeData_t MakeVariable( char* variable );
 Node_t *MakeNode( OperationType op, Node_t *L, Node_t *R );
 
 int CompareDoubleToDouble( double a, double b, double eps );

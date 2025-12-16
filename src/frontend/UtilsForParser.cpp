@@ -2,7 +2,7 @@
 
 #include "frontend/Parser.h"
 
-TreeData_t MakeNumber( double number ) {
+TreeData_t MakeNumber( int number ) {
     TreeData_t value = {};
     value.type = NODE_NUMBER;
     value.data.number = number;
@@ -19,7 +19,7 @@ TreeData_t MakeOperation( OperationType operation ) {
     return value;
 }
 
-TreeData_t MakeVariable( char variable ) {
+TreeData_t MakeVariable( char* variable ) {
     TreeData_t value = {};
 
     value.type = NODE_VARIABLE;

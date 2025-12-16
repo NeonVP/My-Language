@@ -1,23 +1,65 @@
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "DebugUtils.h"
+#include "UtilsRW.h"
 #include "frontend/Parser.h"
 
 #include "Tree.h"
 
 static void SkipSpaces( const char **pos ) {
+    while ( **pos && isspace( (unsigned char)**pos ) ) {
+        ( *pos )++;
+    }
+}
+
+static void SkipComments( const char **pos ) {
     while ( **pos ) {
-        if ( isspace( (unsigned char)**pos ) ) {
-            ( *pos )++;
-        } else if ( **pos == '/' && ( *pos )[1] == '/' ) {
-            while ( **pos && **pos != '\n' )
+        SkipSpaces( pos );
+
+        if ( **pos == '/' && ( *pos )[1] == '/' ) {
+            while ( **pos && **pos != '\n' ) {
                 ( *pos )++;
+            }
         } else {
             break;
         }
     }
+}
+
+static Node_t *TokenNumber( const char **cur_pos ) {
+    my_assert( cur_pos && *cur_pos, "Null pointer on `cur_pos`" );
+
+    TreeData_t value = {};
+    value.type = NODE_NUMBER;
+
+    int read_bytes = 0;
+    sscanf( *cur_pos, "%d%n", &( value.data.number ), &read_bytes );
+    ( *cur_pos ) += read_bytes;
+
+    PRINT( "Number: %d", value.data.number );
+
+    return NodeCreate( value, NULL );
+}
+
+static Node_t *TokenVariable( const char **cur_pos ) {
+    my_assert( cur_pos && *cur_pos, "Null pointer on `cur_pos`" );
+
+    TreeData_t value = {};
+    value.type = NODE_VARIABLE;
+
+    int read_bytes = 0;
+    char buffer[128] = {};
+    sscanf( *cur_pos, "%127s%n", buffer, &read_bytes );
+    value.data.variable = strdup( buffer );
+    ( *cur_pos ) += read_bytes;
+
+    PRINT( "Variable: `%s`", value.data.variable );
+
+    return NodeCreate( value, NULL );
+    ;
 }
 
 static bool MatchOperation( const char *str, OperationType *out_op, size_t *out_len ) {
@@ -28,6 +70,7 @@ static bool MatchOperation( const char *str, OperationType *out_op, size_t *out_
         *out_op = op_enum;                                                                                   \
         *out_len = strlen( token_str );                                                                      \
         found = true;                                                                                        \
+        PRINT( "Operation: `%s`", token_str );                                                                 \
     }
 
     INIT_OPERATIONS( CHECK_OP );
@@ -37,9 +80,12 @@ static bool MatchOperation( const char *str, OperationType *out_op, size_t *out_
 }
 
 static Node_t *ReadToken( const char **pos ) {
+    my_assert( pos && *pos, "Null pointer on `pos`" );
+
     SkipSpaces( pos );
-    if ( !**pos )
-        return NULL;
+    SkipComments( pos );
+
+    PRINT( "Cur. position: \n'`%s`", *pos );
 
     const char *start = *pos;
 
@@ -49,21 +95,10 @@ static Node_t *ReadToken( const char **pos ) {
         *pos = start + op_len;
         TreeData_t data = MakeOperation( op );
         return NodeCreate( data, NULL );
-    }
-
-    if ( isdigit( (unsigned char)**pos ) || **pos == '.' ) {
-        char *end = NULL;
-        double num = strtod( start, &end );
-        if ( end != start ) {
-            *pos = end;
-            return NodeCreate( MakeNumber( num ), NULL );
-        }
-    }
-
-    if ( isalpha( (unsigned char)**pos ) ) {
-        char var = **pos;
-        ( *pos )++;
-        return NodeCreate( MakeVariable( var ), NULL );
+    } else if ( isdigit( (unsigned char)**pos ) || **pos == '.' ) {
+        return TokenNumber( pos );
+    } else if ( isalpha( (unsigned char)**pos ) ) {
+        return TokenVariable( pos );
     }
 
     PRINT_ERROR( "Lexical error: unexpected character '%c' at: \"%.20s\"\n", **pos, start );
@@ -72,52 +107,41 @@ static Node_t *ReadToken( const char **pos ) {
 }
 
 Node_t **LexicalAnalyze( Parser_t *parser ) {
-    if ( !parser || !parser->buffer ) {
+    my_assert( parser, "Null pointer on `parser`" );
+
+    PRINT( "Start lexical analization" );
+
+    TokenArray_t tokens = TokenArrayCreate();
+
+    char *buffer = ReadToBuffer( parser->input_filename );
+    if ( !buffer ) {
+        PRINT_ERROR( "Fail to read source from file `%s`", parser->input_filename );
         return NULL;
     }
+    PRINT( "Succesful reading to buffer" );
 
-    size_t token_count = 0;
-    size_t capacity = 16;
-    Node_t **tokens = (Node_t **)calloc( capacity, sizeof( Node_t * ) );
-    if ( !tokens ) {
-        return NULL;
-    }
-
-    const char *pos = parser->buffer;
+    const char *pos = buffer;
     while ( *pos ) {
         Node_t *token = ReadToken( &pos );
         if ( !token ) {
-            for ( size_t i = 0; i < token_count; i++ ) {
-                if ( tokens[i] )
-                    NodeDelete( tokens[i], NULL, NULL );
-            }
-            free( tokens );
+            TokenArrayDestroy( &tokens );
             return NULL;
         }
 
-        if ( token_count >= capacity ) {
-            capacity *= 2;
-            Node_t **new_tokens = (Node_t **)realloc( tokens, capacity * sizeof( Node_t * ) );
-            if ( !new_tokens ) {
-                for ( size_t i = 0; i < token_count; i++ ) {
-                    if ( tokens[i] )
-                        NodeDelete( tokens[i], NULL, NULL );
-                }
-                free( tokens );
-                return NULL;
-            }
-            tokens = new_tokens;
+        if ( !TokenArrayPushBack( &tokens, token ) ) {
+            NodeDelete( token, NULL, NULL );
+            TokenArrayDestroy( &tokens );
+            return NULL;
         }
-
-        tokens[token_count++] = token;
     }
 
-    // Store tokens in parser structure
-    parser->tokens.data = tokens;
-    parser->tokens.size = token_count;
-    parser->tokens.capacity = capacity;
+    parser->tokens = tokens;
 
-    return tokens;
+    free( buffer );
+
+    PRINT( "Finish lexixal analization" );
+
+    return tokens.data;
 }
 
 void FreeTokenArray( Node_t **tokens, size_t count ) {

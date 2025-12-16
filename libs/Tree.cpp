@@ -13,6 +13,14 @@
 
 const uint32_t fill_color = 0xb6b4b4;
 
+#define OPERATIONS_STRINGS( string, ... ) \
+    string,
+
+static const char* operations_txt[] = { INIT_OPERATIONS( OPERATIONS_STRINGS ) };
+
+#undef OPERATIONS_STRINGS
+
+
 Tree_t *TreeCtor() {
     Tree_t *new_tree = (Tree_t *)calloc( 1, sizeof( *new_tree ) );
     assert( new_tree && "Memory allocation error" );
@@ -212,12 +220,12 @@ static void NodeInitDot( const Node_t *node, FILE *dot_stream ) {
         case NODE_NUMBER:
             DOT_PRINT( "\t\t\t<TD PORT=\"type\">type=NUMBER</TD> \n" );
             DOT_PRINT( "\t\t</TR> \n\t\t<TR> \n" );
-            DOT_PRINT( "\t\t\t<TD PORT=\"value\">value=%lg</TD> \n", node->value.data.number );
+            DOT_PRINT( "\t\t\t<TD PORT=\"value\">value=%d</TD> \n", node->value.data.number );
             break;
         case NODE_VARIABLE:
             DOT_PRINT( "\t\t\t<TD PORT=\"type\">type=VARIABLE</TD> \n" );
             DOT_PRINT( "\t\t</TR> \n\t\t<TR> \n" );
-            DOT_PRINT( "\t\t\t<TD PORT=\"value\">value=`%c`</TD> \n", node->value.data.variable );
+            DOT_PRINT( "\t\t\t<TD PORT=\"value\">value=`%s`</TD> \n", node->value.data.variable );
             break;
         case NODE_OPERATION: {
             DOT_PRINT( "\t\t\t<TD PORT=\"type\">type=OPERATION</TD> \n" );
