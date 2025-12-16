@@ -65,7 +65,7 @@ static Node_t *TokenVariable( const char **cur_pos ) {
 static bool MatchOperation( const char *str, OperationType *out_op, size_t *out_len ) {
     bool found = false;
 
-#define CHECK_OP( token_str, op_enum, is_custom, nargs )                                                     \
+#define CHECK_OP( token_str, op_enum, is_custom, nargs, ... )                                                     \
     if ( !found && strncmp( str, token_str, strlen( token_str ) ) == 0 ) {                                   \
         *out_op = op_enum;                                                                                   \
         *out_len = strlen( token_str );                                                                      \
