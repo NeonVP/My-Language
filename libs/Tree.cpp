@@ -1,9 +1,9 @@
+#include <assert.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <assert.h>
 
 #include <sys/stat.h>
 
@@ -13,13 +13,11 @@
 
 const uint32_t fill_color = 0xb6b4b4;
 
-#define OPERATIONS_STRINGS( string, ... ) \
-    string,
+#define OPERATIONS_STRINGS( token_str, op_enum, is_custom, nargs, string ) string,
 
-static const char* operations_txt[] = { INIT_OPERATIONS( OPERATIONS_STRINGS ) };
+static const char *operations_txt[] = { INIT_OPERATIONS( OPERATIONS_STRINGS ) };
 
 #undef OPERATIONS_STRINGS
-
 
 Tree_t *TreeCtor() {
     Tree_t *new_tree = (Tree_t *)calloc( 1, sizeof( *new_tree ) );
@@ -181,14 +179,15 @@ static void NodeInitDot( const Node_t *node, FILE *dot_stream ) {
     DOT_PRINT( "\tnode_%lX [style=filled, ", (uintptr_t)node );
     switch ( node->value.type ) {
         case NODE_NUMBER:
-            DOT_PRINT( "fillcolor=\"#5DADE2\", label=\"%lg\"]; \n", node->value.data.number );
+            DOT_PRINT( "fillcolor=\"#5DADE2\", label=\"%d\"]; \n", node->value.data.number );
             break;
         case NODE_VARIABLE:
-            DOT_PRINT( "fillcolor=\"#82E0AA\", label=\"`%c`\"]; \n", node->value.data.variable );
+            DOT_PRINT( "fillcolor=\"#82E0AA\", label=\"`%s`\"]; \n", node->value.data.variable );
             break;
         case NODE_OPERATION:
             DOT_PRINT( "fillcolor=\"#F5B041\", label=\"%s\"]; \n",
-                       operations_txt[node->value.data.operation] );
+                       node->value.data.operation >= 0 ? operations_txt[node->value.data.operation]
+                                                       : "NOPE" );
             break;
 
         case NODE_UNKNOWN:
@@ -300,34 +299,35 @@ static void NodeSaveRecursively( const Node_t *node, FILE *file_stream ) {
         return;
     }
 
-    fprintf( file_stream, "(" );
+    fprintf( file_stream, "( " );
 
     switch ( node->value.type ) {
         case NODE_NUMBER:
-            fprintf( file_stream, "%d", node->value.data.number );
+            fprintf( file_stream, "%d ", node->value.data.number );
             break;
         case NODE_VARIABLE:
-            fprintf( file_stream, "\"%s\"", node->value.data.variable );
+            fprintf( file_stream, "\"%s\" ", node->value.data.variable );
             break;
         case NODE_OPERATION:
-            fprintf( file_stream, "%s", operations_txt[node->value.data.operation] );
+            fprintf( file_stream, "%s ", operations_txt[node->value.data.operation] );
             break;
         case NODE_UNKNOWN:
         default:
-            fprintf( file_stream, "?" );
+            fprintf( file_stream, "? " );
             break;
     }
 
-    if ( node->left || node->right ) {
-        fprintf( file_stream, " " );
+    if ( node->left )
         NodeSaveRecursively( node->left, file_stream );
-        fprintf( file_stream, " " );
+    else
+        fprintf( file_stream, "nil " );
+
+    if ( node->right )
         NodeSaveRecursively( node->right, file_stream );
-    }
-
-    fprintf( file_stream, ")" );
+    else
+        fprintf( file_stream, "nil " );
+    fprintf( file_stream, ") " );
 }
-
 
 void TreeSaveToFile( const Tree_t *tree, const char *filename ) {
     if ( !tree || !filename ) {
@@ -345,4 +345,3 @@ void TreeSaveToFile( const Tree_t *tree, const char *filename ) {
 
     fclose( file_stream );
 }
-

@@ -2,39 +2,28 @@
 #include <string.h>
 
 #include "DebugUtils.h"
+#include "Tree.h"
+#include "UtilsRW.h"
 #include "frontend/Parser.h"
 
-// Program     = { Statement }
-// Statement   = WhileStmt | IfStmt | ( Assignment | Expression ) ";"
-// WhileStmt   = "while" "(" Expression ")" "{" { Statement } "}"
-// IfStmt      = "if" "(" Expression ")" "{" { Statement } "}" [ "else" "{" { Statement } "}" ]
-// Assignment  = Variable ( ":=" | "=" ) Expression
-// Expression  = Term { ("+" | "-") Term }
-// Term        = Pow { ("*" | "/") Pow }
-// Pow         = Primary { "^" Primary }
-// Primary     = Number
-//             | Variable
-//             | FunctionCall
-//             | "(" Expression ")"
-//
-// FunctionCall = Identifier "(" [ Expression { "," Expression } ] ")"
-
-
-static Node_t *GetProgram( Parser_t *parser, size_t *index );
-static Node_t *GetWhileStmt( Parser_t *parser, size_t *index );
-static Node_t *GetIfStmt( Parser_t *parser, size_t *index );
-static Node_t *GetStatement( Parser_t *parser, size_t *index );
-static Node_t *GetAssignment( Parser_t *parser, size_t *index, Node_t *var, OperationType op );
-static Node_t *GetExpression( Parser_t *parser, size_t *index );
-static Node_t *GetTerm( Parser_t *parser, size_t *index );
-static Node_t *GetPow( Parser_t *parser, size_t *index );
-static Node_t *GetPrimary( Parser_t *parser, size_t *index );
-// static Node_t *GetFunctionCall( Parser_t *parser, size_t *index, const char *func_name );
-
-static bool MatchToken( Parser_t *parser, size_t index, OperationType op );
-static bool MatchVariable( Parser_t *parser, size_t index, const char *var_name );
-static bool MatchNumber( Parser_t *parser, size_t index, double *out_num );
-static bool AtEnd( Parser_t *parser, size_t index );
+// ===== Grammar (РБНФ / EBNF-ish) =====
+// Grammar     ::= OPSeq
+// OPSeq       ::= OP { OP }                // OP+
+// OP          ::= Block
+//              | Assignment ";"
+//              | Expression ";"
+//              | IfStmt
+//              | WhileStmt
+// Block       ::= "{" OPSeq? "}" [ ";" ]   // ';' allowed before '}' / EOF for sequencing
+// Assignment  ::= Variable ( ":=" | "=" ) Expression
+// IfStmt      ::= "if" "(" Expression ")" OP [ "else" OP ] [ ";" ]
+// WhileStmt   ::= "while" "(" Expression ")" OP [ ";" ]
+// Expression  ::= Term { ("+" | "-") Term }*
+// Term        ::= Pow { ("*" | "/") Pow }*
+// Pow         ::= Primary { "^" Primary }
+// Primary     ::= Number
+//              | Variable
+//              | "(" Expression ")"
 
 static bool AtEnd( Parser_t *parser, size_t index ) { return index >= parser->tokens.size; }
 
@@ -45,234 +34,402 @@ static bool MatchToken( Parser_t *parser, size_t index, OperationType op ) {
     return tok->value.type == NODE_OPERATION && (OperationType)tok->value.data.operation == op;
 }
 
-static bool MatchVariable( Parser_t *parser, size_t index, const char *var_name ) {
+static bool MatchVariable( Parser_t *parser, size_t index ) {
     if ( AtEnd( parser, index ) )
         return false;
     Node_t *tok = parser->tokens.data[index];
-    return tok->value.type == NODE_VARIABLE && strcmp(tok->value.data.variable, var_name) == 0;
+    return tok->value.type == NODE_VARIABLE;
 }
 
-static bool MatchNumber( Parser_t *parser, size_t index, double *out_num ) {
+static Node_t *GetGrammar( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetOPSeq( Parser_t *parser, size_t *index, bool *error, OperationType stop_op );
+static Node_t *GetOP( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetAssignment( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetIfStmt( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetWhileStmt( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetExpression( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetTerm( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetPow( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetPrimary( Parser_t *parser, size_t *index, bool *error );
+static Node_t *GetBlock( Parser_t *parser, size_t *index, bool *error );
+
+Node_t *SyntaxAnalyze( Parser_t *parser ) {
+    my_assert( parser, "Null pointer on `parser`" );
+
+    PRINT( "Start syntax analysis" );
+
+    bool error = false;
+    size_t index = 0;
+    Node_t *node = GetGrammar( parser, &index, &error );
+
+    if ( error ) {
+        // Extra diagnostics: sometimes the exact SyntaxError message is not enough in logs.
+        PRINT_ERROR( "SyntaxAnalyze failed near token %zu/%zu", index, parser->tokens.size );
+        if ( !AtEnd( parser, index ) ) {
+            Node_t *tok = parser->tokens.data[index];
+            if ( tok->value.type == NODE_OPERATION )
+                PRINT_ERROR( "Current token: OP %d", tok->value.data.operation );
+            else if ( tok->value.type == NODE_NUMBER )
+                PRINT_ERROR( "Current token: NUMBER %d", tok->value.data.number );
+            else if ( tok->value.type == NODE_VARIABLE )
+                PRINT_ERROR( "Current token: VAR %s", tok->value.data.variable ? tok->value.data.variable : "(null)" );
+            else
+                PRINT_ERROR( "Current token: UNKNOWN" );
+        }
+
+        PRINT_ERROR( "The expression was not considered correct." );
+        TreeDtor( &( parser->tree ), NULL );
+        return NULL;
+    }
+
+    if ( !AtEnd( parser, index ) ) {
+        PRINT_ERROR( "Unexpected tokens at end of input" );
+        return NULL;
+    }
+
+    PRINT( "The program was considered correct." );
+    return node;
+}
+
+#define SyntaxError( msg )                                                                                     \
+    do {                                                                                                       \
+        PRINT_ERROR( "Syntax error: %s at token %zu", msg, *index );                                           \
+        *error = true;                                                                                         \
+        return NULL;                                                                                           \
+    } while ( 0 )
+
+static Node_t *GetGrammar( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    Node_t *seq = GetOPSeq( parser, index, error, OP_NOPE );
+    if ( *error )
+        return NULL;
+    if ( !seq )
+        SyntaxError( "Expected at least one operator" );
+
+    return seq;
+}
+
+static Node_t *ConsumeOp( Parser_t *parser, size_t *index, bool *error, OperationType op, const char *msg ) {
+    if ( !MatchToken( parser, *index, op ) ) {
+        SyntaxError( msg );
+    }
+    Node_t *tok = parser->tokens.data[*index];
+    ( *index )++;
+    return tok;
+}
+
+static bool IsStatementStart( Parser_t *parser, size_t index ) {
     if ( AtEnd( parser, index ) )
         return false;
+
     Node_t *tok = parser->tokens.data[index];
-    if ( tok->value.type == NODE_NUMBER ) {
-        if ( out_num )
-            *out_num = tok->value.data.number;
+    if ( tok->value.type == NODE_VARIABLE || tok->value.type == NODE_NUMBER )
         return true;
+
+    if ( tok->value.type == NODE_OPERATION ) {
+        OperationType op = (OperationType)tok->value.data.operation;
+        return op == OP_OPEN_BRACE || op == OP_IF || op == OP_WHILE || op == OP_OPEN_PARENT;
     }
+
     return false;
 }
 
-static void ExpectToken( Parser_t *parser, size_t *index, OperationType op, const char *msg ) {
-    if ( !MatchToken( parser, *index, op ) ) {
-        PRINT_ERROR( "Expected %s at token %zu", msg, *index );
-        abort();
-    }
-    ( *index )++;
-}
+static Node_t *GetOPSeq( Parser_t *parser, size_t *index, bool *error, OperationType stop_op ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
 
-static Node_t *GetProgram( Parser_t *parser, size_t *index ) {
-    Node_t *root = NULL;
-    Node_t *prev = NULL;
+    Node_t *head = GetOP( parser, index, error );
+    if ( *error || !head )
+        return head;
 
-    while ( !AtEnd( parser, *index ) && !MatchToken( parser, *index, OP_CLOSE_BRACE ) ) {
-        Node_t *stmt = GetStatement( parser, index );
-        if ( !stmt )
-            break;
+    while ( !AtEnd( parser, *index ) && !( stop_op != OP_NOPE && MatchToken( parser, *index, stop_op ) ) ) {
+        if ( MatchToken( parser, *index, OP_SEMICOLON ) ) {
+            Node_t *semicolon = ConsumeOp( parser, index, error, OP_SEMICOLON, "Expected ';'" );
+            if ( *error )
+                return NULL;
 
-        if ( !root ) {
-            root = stmt;
+            // User's specific spine logic:
+            // 1st semicolon: ( ; stmt1 nil )
+            // n-th semicolon: ( ; prev_seq next_stmt )
+            
+            // Check if this is the first semicolon in the whole program/block
+            bool is_first_wrap = ( head->value.type != NODE_OPERATION || (OperationType)head->value.data.operation != OP_SEMICOLON );
+            
+            if ( is_first_wrap ) {
+                semicolon->left = head;
+                semicolon->right = NULL;
+                if ( head ) head->parent = semicolon;
+                head = semicolon;
+            } else {
+                semicolon->left = head;
+                if ( head ) head->parent = semicolon;
+                head = semicolon;
+
+                if ( IsStatementStart( parser, *index ) ) {
+                    Node_t *next = GetOP( parser, index, error );
+                    semicolon->right = next;
+                    if ( next ) next->parent = semicolon;
+                } else {
+                    semicolon->right = NULL;
+                }
+            }
+        } else if ( IsStatementStart( parser, *index ) ) {
+            // Join 'if' or similar to current semicolon spine
+            Node_t *next = GetOP( parser, index, error );
+            if ( *error ) return NULL;
+
+            if ( head->value.type == NODE_OPERATION && (OperationType)head->value.data.operation == OP_SEMICOLON ) {
+                if ( head->right == NULL ) {
+                    head->right = next;
+                    if ( next ) next->parent = head;
+                } else {
+                    // This happens if multiple stmts exist but we run out of tokens.
+                    // We'll wrap again if needed, but for user's source this is the 'if' case.
+                    head = next; 
+                }
+            } else {
+                head = next;
+            }
         } else {
-            TreeData_t seq_data = MakeOperation( OP_SEMICOLON );
-            Node_t *seq = NodeCreate( seq_data, NULL );
-            seq->left = prev;
-            seq->right = stmt;
-            if ( prev )
-                prev->parent = seq;
-            if ( stmt )
-                stmt->parent = seq;
-            if ( root == prev )
-                root = seq;
-            prev = seq;
+            break;
         }
-        prev = stmt;
     }
 
-    return root;
+    return head;
 }
 
+static Node_t *GetOP( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
 
-static Node_t *GetStatement( Parser_t *parser, size_t *index ) {
-    if ( AtEnd( parser, *index ) )
+    if ( AtEnd( parser, *index ) ) {
+        return NULL;
+    }
+
+    if ( MatchToken( parser, *index, OP_OPEN_BRACE ) ) {
+        return GetBlock( parser, index, error );
+    }
+
+    if ( MatchToken( parser, *index, OP_WHILE ) ) {
+        return GetWhileStmt( parser, index, error );
+    }
+
+    if ( MatchToken( parser, *index, OP_IF ) ) {
+        return GetIfStmt( parser, index, error );
+    }
+
+    // Assignment or expression statement
+    Node_t *stmt = NULL;
+    if ( MatchVariable( parser, *index ) && !AtEnd( parser, *index + 1 ) &&
+         ( MatchToken( parser, *index + 1, OP_ADVERT ) || MatchToken( parser, *index + 1, OP_ASSIGN ) ) ) {
+        stmt = GetAssignment( parser, index, error );
+    } else {
+        stmt = GetExpression( parser, index, error );
+    }
+
+    return stmt;
+}
+
+static Node_t *GetAssignment( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    if ( !MatchVariable( parser, *index ) )
+        SyntaxError( "Expected variable at assignment start" );
+
+    Node_t *var = parser->tokens.data[*index];
+    ( *index )++;
+
+    if ( !( MatchToken( parser, *index, OP_ADVERT ) || MatchToken( parser, *index, OP_ASSIGN ) ) )
+        SyntaxError( "Expected ':=' or '=' in assignment" );
+
+    Node_t *assign_op = parser->tokens.data[*index];
+    ( *index )++;
+
+    Node_t *expr = GetExpression( parser, index, error );
+    if ( *error )
         return NULL;
 
-    // Check for while statement
-    if ( MatchToken( parser, *index, OP_WHILE ) ) {
-        return GetWhileStmt( parser, index );
-    }
+    // Build assignment tree using existing nodes
+    assign_op->left = var;
+    assign_op->right = expr;
 
-    // Check for if statement
-    if ( MatchToken( parser, *index, OP_IF ) ) {
-        return GetIfStmt( parser, index );
-    }
-
-    // Assignment: x := expr
-    if ( parser->tokens.data[*index]->value.type == NODE_VARIABLE ) {
-        Node_t *var = NodeCopy( parser->tokens.data[( *index )++] );
-        if ( MatchToken( parser, *index, OP_ADVERT ) || MatchToken( parser, *index, OP_ASSIGN ) ) {
-            OperationType assign_op = (OperationType)parser->tokens.data[*index]->value.data.operation;
-            ( *index )++;
-            Node_t *expr = GetExpression( parser, index );
-            return GetAssignment( parser, index, var, assign_op );
-        } else {
-            Node_t *expr = var;
-            ExpectToken( parser, index, OP_SEMICOLON, "';' after expression" );
-            return expr;
-        }
-    }
-
-    // Expression: expr;
-    Node_t *expr = GetExpression( parser, index );
-    ExpectToken( parser, index, OP_SEMICOLON, "';' after expression" );
-    return expr;
-}
-
-static Node_t *GetWhileStmt( Parser_t *parser, size_t *index ) {
-    // Consume 'while' token
-    ( *index )++;
-
-    // Expect '('
-    ExpectToken( parser, index, OP_OPEN_PARENT, "\"(\" after while" );
-
-    // Get condition expression
-    Node_t *condition = GetExpression( parser, index );
-
-    // Expect ')'
-    ExpectToken( parser, index, OP_CLOSE_PARENT, "\")\" after while condition" );
-
-    // Expect '{'
-    ExpectToken( parser, index, OP_OPEN_BRACE, "\"{\" after while condition" );
-
-    // Get body statements until '}'
-    Node_t *body = GetProgram( parser, index );
-
-    // Expect '}'
-    ExpectToken( parser, index, OP_CLOSE_BRACE, "\"}\" after while body" );
-
-    // Create while node
-    TreeData_t while_data = MakeOperation( OP_WHILE );
-    Node_t *while_node = NodeCreate( while_data, NULL );
-    while_node->left = condition;
-    while_node->right = body;
-    if ( condition )
-        condition->parent = while_node;
-    if ( body )
-        body->parent = while_node;
-
-    return while_node;
-}
-
-static Node_t *GetIfStmt( Parser_t *parser, size_t *index ) {
-    // Consume 'if' token
-    ( *index )++;
-
-    // Expect '('
-    ExpectToken( parser, index, OP_OPEN_PARENT, "\"(\" after if" );
-
-    // Get condition expression
-    Node_t *condition = GetExpression( parser, index );
-
-    // Expect ')'
-    ExpectToken( parser, index, OP_CLOSE_PARENT, "\")\" after if condition" );
-
-    // Expect '{'
-    ExpectToken( parser, index, OP_OPEN_BRACE, "\"{\" after if condition" );
-
-    // Get then body statements until '}'
-    Node_t *then_body = GetProgram( parser, index );
-
-    // Expect '}'
-    ExpectToken( parser, index, OP_CLOSE_BRACE, "\"}\" after if then body" );
-
-    // Check for optional 'else'
-    Node_t *else_body = NULL;
-    if ( MatchToken( parser, *index, OP_ELSE ) ) {
-        ( *index )++; // consume 'else'
-
-        // Expect '{'
-        ExpectToken( parser, index, OP_OPEN_BRACE, "\"{\" after else" );
-
-        // Get else body statements until '}'
-        else_body = GetProgram( parser, index );
-
-        // Expect '}'
-        ExpectToken( parser, index, OP_CLOSE_BRACE, "\"}\" after else body" );
-    }
-
-    // Create if node
-    TreeData_t if_data = MakeOperation( OP_IF );
-    Node_t *if_node = NodeCreate( if_data, NULL );
-    if_node->left = condition;
-    if_node->right = NodeCreate( MakeOperation( OP_SEMICOLON ), NULL ); // connector for then and else
-    if_node->right->left = then_body;
-    if_node->right->right = else_body;
-
-    if ( condition )
-        condition->parent = if_node;
-    if ( then_body )
-        then_body->parent = if_node->right;
-    if ( else_body )
-        else_body->parent = if_node->right;
-
-    return if_node;
-}
-
-
-static Node_t *GetAssignment( Parser_t *parser, size_t *index, Node_t *var, OperationType op ) {
-    Node_t *expr = GetExpression( parser, index );
-    ExpectToken( parser, index, OP_SEMICOLON, "';' after assignment" );
-
-    TreeData_t assign_data = MakeOperation( op );
-    Node_t *assign = NodeCreate( assign_data, NULL );
-    assign->left = var;
-    assign->right = expr;
     if ( var )
-        var->parent = assign;
+        var->parent = assign_op;
     if ( expr )
-        expr->parent = assign;
+        expr->parent = assign_op;
 
-    return assign;
+    return assign_op;
 }
 
-static Node_t *GetExpression( Parser_t *parser, size_t *index ) {
-    Node_t *node = GetTerm( parser, index );
+static Node_t *GetWhileStmt( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    Node_t *while_token = ConsumeOp( parser, index, error, OP_WHILE, "Expected 'while'" );
+    if ( *error )
+        return NULL;
+
+    ConsumeOp( parser, index, error, OP_OPEN_PARENT, "Expected '(' after while" );
+    if ( *error )
+        return NULL;
+
+    Node_t *condition = GetExpression( parser, index, error );
+    if ( *error )
+        return NULL;
+
+    ConsumeOp( parser, index, error, OP_CLOSE_PARENT, "Expected ')' after while condition" );
+    if ( *error )
+        return NULL;
+
+    // Body is parsed as OP.
+    Node_t *body = GetOP( parser, index, error );
+    if ( *error )
+        return NULL;
+    if ( !body )
+        SyntaxError( "Expected while body" );
+
+    while_token->left = condition;
+    while_token->right = body;
+    if ( condition )
+        condition->parent = while_token;
+    if ( body )
+        body->parent = while_token;
+
+    return while_token;
+}
+
+static Node_t *GetIfStmt( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    Node_t *if_token = ConsumeOp( parser, index, error, OP_IF, "Expected 'if'" );
+    if ( *error )
+        return NULL;
+
+    ConsumeOp( parser, index, error, OP_OPEN_PARENT, "Expected '(' after if" );
+    if ( *error )
+        return NULL;
+
+    Node_t *condition = GetExpression( parser, index, error );
+    if ( *error )
+        return NULL;
+
+    ConsumeOp( parser, index, error, OP_CLOSE_PARENT, "Expected ')' after if condition" );
+    if ( *error )
+        return NULL;
+
+    Node_t *then_stmt = GetOP( parser, index, error );
+    if ( *error )
+        return NULL;
+    if ( !then_stmt )
+        SyntaxError( "Expected statement after if" );
+
+    Node_t *else_token = NULL;
+    Node_t *else_stmt = NULL;
+
+    if ( MatchToken( parser, *index, OP_ELSE ) ) {
+        else_token = ConsumeOp( parser, index, error, OP_ELSE, "Expected 'else'" );
+        if ( *error )
+            return NULL;
+
+        else_stmt = GetOP( parser, index, error );
+        if ( *error )
+            return NULL;
+        if ( !else_stmt )
+            SyntaxError( "Expected statement after else" );
+    }
+
+    if_token->left = condition;
+    if ( condition )
+        condition->parent = if_token;
+
+    if ( !else_token ) {
+        if_token->right = then_stmt;
+        if ( then_stmt )
+            then_stmt->parent = if_token;
+        return if_token;
+    }
+
+    // if (...) OP else OP
+    // Connect branches through else-token.
+    else_token->left = then_stmt;
+    else_token->right = else_stmt;
+    if ( then_stmt )
+        then_stmt->parent = else_token;
+    if ( else_stmt )
+        else_stmt->parent = else_token;
+
+    if_token->right = else_token;
+    else_token->parent = if_token;
+
+    return if_token;
+}
+
+static Node_t *GetBlock( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    // Braces are syntax-only: they do not appear in AST. We return the inside OPSeq.
+    ConsumeOp( parser, index, error, OP_OPEN_BRACE, "Expected '{'" );
+    if ( *error )
+        return NULL;
+
+    Node_t *body = NULL;
+    if ( !MatchToken( parser, *index, OP_CLOSE_BRACE ) ) {
+        body = GetOPSeq( parser, index, error, OP_CLOSE_BRACE );
+        if ( *error )
+            return NULL;
+    }
+
+    ConsumeOp( parser, index, error, OP_CLOSE_BRACE, "Expected '}'" );
+    if ( *error )
+        return NULL;
+
+    // Empty blocks are not allowed by OP+ in the original grammar.
+    if ( !body )
+        SyntaxError( "Empty block is not allowed" );
+
+    return body;
+}
+
+static Node_t *GetExpression( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    Node_t *node = GetTerm( parser, index, error );
+    if ( *error )
+        return NULL;
 
     while ( !AtEnd( parser, *index ) ) {
-        if ( MatchToken( parser, *index, OP_ADD ) ) {
-            ( *index )++;
-            Node_t *right = GetTerm( parser, index );
-            TreeData_t op_data = MakeOperation( OP_ADD );
-            Node_t *new_root = NodeCreate( op_data, NULL );
-            new_root->left = node;
-            new_root->right = right;
+        if ( MatchToken( parser, *index, OP_ADD ) || MatchToken( parser, *index, OP_SUB ) ) {
+            Node_t *op_node = parser->tokens.data[*index];
+            ( *index )++; // consume operator
+
+            Node_t *right = GetTerm( parser, index, error );
+            if ( *error )
+                return NULL;
+
+            // Build tree using op_node
+            op_node->left = node;
+            op_node->right = right;
+
             if ( node )
-                node->parent = new_root;
+                node->parent = op_node;
             if ( right )
-                right->parent = new_root;
-            node = new_root;
-        } else if ( MatchToken( parser, *index, OP_SUB ) ) {
-            ( *index )++;
-            Node_t *right = GetTerm( parser, index );
-            TreeData_t op_data = MakeOperation( OP_SUB );
-            Node_t *new_root = NodeCreate( op_data, NULL );
-            new_root->left = node;
-            new_root->right = right;
-            if ( node )
-                node->parent = new_root;
-            if ( right )
-                right->parent = new_root;
-            node = new_root;
+                right->parent = op_node;
+
+            node = op_node;
         } else {
             break;
         }
@@ -281,34 +438,33 @@ static Node_t *GetExpression( Parser_t *parser, size_t *index ) {
     return node;
 }
 
-static Node_t *GetTerm( Parser_t *parser, size_t *index ) {
-    Node_t *node = GetPow( parser, index );
+static Node_t *GetTerm( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
+    Node_t *node = GetPow( parser, index, error );
+    if ( *error )
+        return NULL;
 
     while ( !AtEnd( parser, *index ) ) {
-        if ( MatchToken( parser, *index, OP_MUL ) ) {
-            ( *index )++;
-            Node_t *right = GetPow( parser, index );
-            TreeData_t op_data = MakeOperation( OP_MUL );
-            Node_t *new_root = NodeCreate( op_data, NULL );
-            new_root->left = node;
-            new_root->right = right;
+        if ( MatchToken( parser, *index, OP_MUL ) || MatchToken( parser, *index, OP_DIV ) ) {
+            Node_t *op_node = parser->tokens.data[*index];
+            ( *index )++; // consume operator
+
+            Node_t *right = GetPow( parser, index, error );
+            if ( *error )
+                return NULL;
+
+            op_node->left = node;
+            op_node->right = right;
+
             if ( node )
-                node->parent = new_root;
+                node->parent = op_node;
             if ( right )
-                right->parent = new_root;
-            node = new_root;
-        } else if ( MatchToken( parser, *index, OP_DIV ) ) {
-            ( *index )++;
-            Node_t *right = GetPow( parser, index );
-            TreeData_t op_data = MakeOperation( OP_DIV );
-            Node_t *new_root = NodeCreate( op_data, NULL );
-            new_root->left = node;
-            new_root->right = right;
-            if ( node )
-                node->parent = new_root;
-            if ( right )
-                right->parent = new_root;
-            node = new_root;
+                right->parent = op_node;
+
+            node = op_node;
         } else {
             break;
         }
@@ -317,98 +473,67 @@ static Node_t *GetTerm( Parser_t *parser, size_t *index ) {
     return node;
 }
 
-static Node_t *GetPow( Parser_t *parser, size_t *index ) {
-    Node_t *node = GetPrimary( parser, index );
+static Node_t *GetPow( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
 
-    while ( !AtEnd( parser, *index ) && MatchToken( parser, *index, OP_POW ) ) {
-        ( *index )++;
-        Node_t *right = GetPrimary( parser, index );
-        TreeData_t op_data = MakeOperation( OP_POW );
-        Node_t *new_root = NodeCreate( op_data, NULL );
-        new_root->left = node;
-        new_root->right = right;
+    Node_t *node = GetPrimary( parser, index, error );
+    if ( *error )
+        return NULL;
+
+    while ( MatchToken( parser, *index, OP_POW ) ) {
+        Node_t *op_node = parser->tokens.data[*index];
+        ( *index )++; // consume '^'
+
+        Node_t *right = GetPrimary( parser, index, error );
+        if ( *error )
+            return NULL;
+
+        op_node->left = node;
+        op_node->right = right;
+
         if ( node )
-            node->parent = new_root;
+            node->parent = op_node;
         if ( right )
-            right->parent = new_root;
-        node = new_root;
+            right->parent = op_node;
+
+        node = op_node;
     }
 
     return node;
 }
 
-static Node_t *GetPrimary( Parser_t *parser, size_t *index ) {
+static Node_t *GetPrimary( Parser_t *parser, size_t *index, bool *error ) {
+    my_assert( parser, "Null pointer on `parser`" );
+    my_assert( index, "Null pointer on `index`" );
+    my_assert( error, "Null pointer on `error`" );
+
     if ( AtEnd( parser, *index ) ) {
-        PRINT_ERROR( "Unexpected end of input" );
-        abort();
+        SyntaxError( "Unexpected end of input" );
     }
 
     Node_t *tok = parser->tokens.data[*index];
 
-    if ( tok->value.type == NODE_NUMBER ) {
+    if ( tok->value.type == NODE_NUMBER || tok->value.type == NODE_VARIABLE ) {
         ( *index )++;
-        return NodeCopy( tok );
-    }
-
-    if ( tok->value.type == NODE_VARIABLE ) {
-        char *var_name = tok->value.data.variable;
-        ( *index )++;
-        if ( !AtEnd( parser, *index ) && MatchToken( parser, *index, OP_OPEN_PARENT ) ) {
-            // return GetFunctionCall( parser, index, var_name );
-            return GetExpression( parser, index );
-        }
-        return NodeCopy( tok );
+        return tok;
     }
 
     if ( MatchToken( parser, *index, OP_OPEN_PARENT ) ) {
-        ( *index )++;
-        Node_t *expr = GetExpression( parser, index );
-        ExpectToken( parser, index, OP_CLOSE_PARENT, "')'" );
+        ( *index )++; // consume '('
+
+        Node_t *expr = GetExpression( parser, index, error );
+        if ( *error )
+            return NULL;
+
+        ConsumeOp( parser, index, error, OP_CLOSE_PARENT, "Expected ')'" );
+        if ( *error )
+            return NULL;
+
         return expr;
     }
 
-    PRINT_ERROR( "Unexpected token at %zu", *index );
-    abort();
+    SyntaxError( "Expected number, variable, or '('" );
+    return NULL;
 }
-
-
-Node_t *SyntaxAnalyze( Parser_t* parser ) {
-    my_assert( parser, "Null pointer on `parser`" );
-
-    size_t index = 0;
-    return GetProgram( parser, &index );
-}
-
-// static Node_t *GetFunctionCall( Parser_t *parser, size_t *index, const char *func_name ) {
-//     // func_name — это один символ (переменная)
-//     OperationType op = OP_NOPE;
-//     if ( strncmp( func_name, "sin", 1 ) == 0 )
-//         op = OP_SIN;
-//     else if ( strncmp( func_name, "cos", 1 ) == 0 )
-//         op = OP_COS;
-//     // ... добавьте все функции
-
-//     ExpectToken( parser, index, OP_OPEN_PARENT, "'(' after function name" );
-
-//     Node_t *arg1 = NULL, *arg2 = NULL;
-//     if ( !MatchToken( parser, *index, OP_CLOSE_PARENT ) ) {
-//         arg1 = GetExpression( parser, index );
-//         if ( !MatchToken( parser, *index, OP_CLOSE_PARENT ) ) {
-//             ExpectToken( parser, index, OP_COMMA, "','" );
-//             arg2 = GetExpression( parser, index );
-//         }
-//     }
-
-//     ExpectToken( parser, index, OP_CLOSE_PARENT, "')'" );
-
-//     TreeData_t op_data = MakeOperation( op );
-//     Node_t *call = NodeCreate( op_data, NULL );
-//     call->left = arg1;
-//     if ( arg1 )
-//         arg1->parent = call;
-//     call->right = arg2;
-//     if ( arg2 )
-//         arg2->parent = call;
-
-//     return call;
-// }

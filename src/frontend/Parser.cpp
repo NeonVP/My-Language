@@ -53,7 +53,8 @@ static bool ParseArgs( Parser_t *parser, int argc, char **argv ) {
 
 #ifdef _DEBUG
 static void DumpCtor( Log_t *logging ) {
-    logging->log_path = strdup( "dump" );
+    my_assert( logging, "Null pointer on `logging`" );
+    logging->log_path = strdup( "dump_front" );
 
     char buffer[MAX_LEN_PATH] = {};
 

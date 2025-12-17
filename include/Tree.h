@@ -12,20 +12,19 @@ const size_t MAX_LEN_PATH = PATH_MAX;
 const size_t MAX_LEN_PATH = 256;
 #endif
 
-
-#define OPERATIONS_ENUM( str, name, value, ... ) \
-    name = value,
-
 enum NodeType {
     NODE_UNKNOWN = -1,
 
-    NODE_NUMBER    = 0,
-    NODE_VARIABLE  = 1,
+    NODE_NUMBER = 0,
+    NODE_VARIABLE = 1,
     NODE_OPERATION = 2
 };
 
+#define OPERATIONS_ENUM( str, name, ... ) \
+    name,
+
 enum OperationType {
-    OP_NOPE = 0,
+    OP_NOPE = -1,
     
     INIT_OPERATIONS( OPERATIONS_ENUM )
 };

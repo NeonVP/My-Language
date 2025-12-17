@@ -50,16 +50,19 @@ static Node_t *TokenVariable( const char **cur_pos ) {
     TreeData_t value = {};
     value.type = NODE_VARIABLE;
 
-    int read_bytes = 0;
     char buffer[128] = {};
-    sscanf( *cur_pos, "%127s%n", buffer, &read_bytes );
+    int i = 0;
+    while ( ( **cur_pos ) && ( isalnum( (unsigned char)**cur_pos ) || **cur_pos == '_' ) && i < 127 ) {
+        buffer[i++] = **cur_pos;
+        ( *cur_pos )++;
+    }
+    buffer[i] = '\0';
+
     value.data.variable = strdup( buffer );
-    ( *cur_pos ) += read_bytes;
 
     PRINT( "Variable: `%s`", value.data.variable );
 
     return NodeCreate( value, NULL );
-    ;
 }
 
 static bool MatchOperation( const char *str, OperationType *out_op, size_t *out_len ) {
@@ -84,6 +87,10 @@ static Node_t *ReadToken( const char **pos ) {
 
     SkipSpaces( pos );
     SkipComments( pos );
+
+    // If we've reached end of input after skipping spaces/comments, return NULL
+    if ( !**pos )
+        return NULL;
 
     PRINT( "Cur. position: \n'`%s`", *pos );
 
@@ -124,6 +131,15 @@ Node_t **LexicalAnalyze( Parser_t *parser ) {
     while ( *pos ) {
         Node_t *token = ReadToken( &pos );
         if ( !token ) {
+            // If ReadToken returns NULL, it could be EOF (after skipping spaces) or an error
+            // Check if we're at EOF (no more non-whitespace characters)
+            SkipSpaces( &pos );
+            SkipComments( &pos );
+            if ( !*pos ) {
+                // End of input reached normally
+                break;
+            }
+            // Otherwise it's a real error
             TokenArrayDestroy( &tokens );
             return NULL;
         }

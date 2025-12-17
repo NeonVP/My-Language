@@ -12,19 +12,24 @@ TokenArray_t TokenArrayCreate( void ) {
     return arr;
 }
 
-static void CleanFunction( TreeData_t value, Tree_t *tree ) {
-    if ( value.type == NODE_VARIABLE )
-        free( value.data.variable );
-}
-
 void TokenArrayDestroy( TokenArray_t *arr ) {
     if ( !arr )
         return;
 
+    // IMPORTANT:
+    // Tokens are later re-linked into an AST by the syntax analyzer (via left/right/parent).
+    // Therefore TokenArrayDestroy must NOT use NodeDelete(), because NodeDelete() recursively
+    // deletes children and would double-free / UAF when the array still contains pointers to
+    // nodes already freed through the AST links.
     for ( size_t i = 0; i < arr->size; i++ ) {
-        if ( arr->data[i] ) {
-            NodeDelete( arr->data[i], NULL, CleanFunction );
-        }
+        Node_t *node = arr->data[i];
+        if ( !node )
+            continue;
+
+        if ( node->value.type == NODE_VARIABLE )
+            free( node->value.data.variable );
+
+        free( node );
     }
 
     free( arr->data );
