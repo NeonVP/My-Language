@@ -30,14 +30,14 @@ int main( int argc, char** argv ) {
     }
 
     // Загружаем AST из файла
-    // TODO: реализовать TreeLoadFromFile
-    // Пока предполагаем, что дерево уже загружено
-    codegen->tree = TreeCtor();
+    codegen->tree = TreeLoadFromFile( input_file );
     if ( !codegen->tree ) {
-        PRINT_ERROR( "Failed to create tree" );
+        PRINT_ERROR( "Failed to load AST from file: %s", input_file );
         CodeGenDtor( &codegen );
         return 1;
     }
+
+    PRINT( "AST loaded successfully" );
 
     // Генерируем ассемблерный код
     GenerateCode( codegen );
