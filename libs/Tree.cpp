@@ -32,11 +32,21 @@ static TreeData_t MakeOperation( OperationType operation ) {
     return value;
 }
 
-static TreeData_t MakeVariable( char *variable ) {
+// Fixed: copy variable string to heap instead of stack reference
+static TreeData_t MakeVariable( const char *variable_src ) {
     TreeData_t value = {};
-
     value.type = NODE_VARIABLE;
-    value.data.variable = variable;
+
+    if ( variable_src ) {
+        size_t len = strlen( variable_src );
+        char *copy = (char *)calloc( len + 1, sizeof( char ) );
+        assert( copy && "Memory allocation error" );
+        memcpy( copy, variable_src, len );
+        copy[len] = '\0';
+        value.data.variable = copy;
+    } else {
+        value.data.variable = NULL;
+    }
 
     return value;
 }
@@ -48,10 +58,19 @@ static const char *operations_txt[] = { INIT_OPERATIONS( OPERATIONS_STRINGS ) };
 #undef OPERATIONS_STRINGS
 
 // Forward declarations for TreeLoadFromFile
-static Node_t *NodeLoadRecursively( const char **pos );
+static Node_t *NodeLoadRecursively( const char **pos, char *error_buffer, size_t error_size );
 static void SkipSpaces( const char **pos );
-static bool MatchString( const char **pos, const char *str );
-static int FindOperationType( const char *str );
+static void SetError( char *error_buffer, size_t error_size, const char *fmt, ... );
+
+static void SetError( char *error_buffer, size_t error_size, const char *fmt, ... ) {
+    if ( !error_buffer || error_size == 0 )
+        return;
+
+    va_list args;
+    va_start( args, fmt );
+    vsnprintf( error_buffer, error_size, fmt, args );
+    va_end( args );
+}
 
 Tree_t *TreeCtor() {
     Tree_t *new_tree = (Tree_t *)calloc( 1, sizeof( *new_tree ) );
@@ -396,7 +415,7 @@ static void SkipSpaces( const char **pos ) {
         value = MakeOperation( enum_name );                                                                  \
     }
 
-static Node_t *NodeLoadRecursively( const char **pos ) {
+static Node_t *NodeLoadRecursively( const char **pos, char *error_buffer, size_t error_size ) {
     my_assert( pos && *pos, "Null pointer on `pos`" );
 
     SkipSpaces( pos );
@@ -411,23 +430,35 @@ static Node_t *NodeLoadRecursively( const char **pos ) {
         int buffer_number = 0;
         int read_bytes = 0;
 
-        if ( sscanf( *pos, "\"%127s\"%n", buffer, &read_bytes ) == 1 ) {
+        // Fixed: read string until closing quote instead of until space
+        if ( sscanf( *pos, "\"%127[^\"]\"%n", buffer, &read_bytes ) == 1 ) {
             value = MakeVariable( buffer );
-        } else if ( sscanf( *pos, "\"%d\"%n", &buffer_number, &read_bytes ) == 1 ) {
+        } else if ( sscanf( *pos, "%d%n", &buffer_number, &read_bytes ) == 1 ) {
             value = MakeNumber( buffer_number );
         } else if ( sscanf( *pos, "%127s%n", buffer, &read_bytes ) == 1 ) {
             INIT_OPERATIONS( CMP_OP );
+            if ( value.type != NODE_OPERATION ) {
+                SetError( error_buffer, error_size,
+                          "Unknown operation '%s' near: '%.20s'", buffer, *pos );
+                PRINT_ERROR( "Unknown operation '%s'", buffer );
+                return NULL;
+            }
+        } else {
+            SetError( error_buffer, error_size,
+                      "Unexpected token near: '%.20s'", *pos );
+            PRINT_ERROR( "Unexpected token in tree.txt" );
+            return NULL;
         }
 
         ( *pos ) += read_bytes;
 
         Node_t *node = NodeCreate( value, NULL );
 
-        node->left = NodeLoadRecursively( pos );
+        node->left = NodeLoadRecursively( pos, error_buffer, error_size );
         if ( node->left )
             node->left->parent = node;
 
-        node->right = NodeLoadRecursively( pos );
+        node->right = NodeLoadRecursively( pos, error_buffer, error_size );
         if ( node->right )
             node->right->parent = node;
 
@@ -435,6 +466,12 @@ static Node_t *NodeLoadRecursively( const char **pos ) {
 
         if ( **pos == ')' )
             ( *pos )++;
+        else {
+            SetError( error_buffer, error_size,
+                      "Expected ')' near: '%.20s'", *pos );
+            PRINT_ERROR( "Expected ')' in tree.txt" );
+            return NULL;
+        }
 
         return node;
     }
@@ -444,36 +481,46 @@ static Node_t *NodeLoadRecursively( const char **pos ) {
         return NULL;
     }
 
+    SetError( error_buffer, error_size,
+              "Expected '(' or 'nil' near: '%.20s'", *pos );
     PRINT_ERROR( "Error in tree.txt" );
     return NULL;
 }
 
-Tree_t *TreeLoadFromFile( const char *filename ) {
+Tree_t *TreeLoadFromFile( const char *filename, char *error_buffer, size_t error_size ) {
+    if ( error_buffer && error_size > 0 )
+        error_buffer[0] = '\0';
+
     if ( !filename ) {
         PRINT_ERROR( "Null pointer on `filename`" );
+        SetError( error_buffer, error_size, "Null filename" );
         return NULL;
     }
 
     char *buffer = ReadToBuffer( filename );
     if ( !buffer ) {
         PRINT_ERROR( "Failed to read file `%s`", filename );
+        SetError( error_buffer, error_size, "Failed to read file '%s'", filename );
         return NULL;
     }
 
     Tree_t *tree = TreeCtor();
     if ( !tree ) {
         PRINT_ERROR( "Failed to create tree" );
+        SetError( error_buffer, error_size, "Failed to allocate Tree_t" );
         free( buffer );
         return NULL;
     }
 
     const char *pos = buffer;
-    tree->root = NodeLoadRecursively( &pos );
+    tree->root = NodeLoadRecursively( &pos, error_buffer, error_size );
 
     free( buffer );
 
     if ( !tree->root ) {
         PRINT_ERROR( "Failed to parse tree from file" );
+        if ( !error_buffer || error_buffer[0] == '\0' )
+            SetError( error_buffer, error_size, "Failed to parse tree from file" );
         TreeDtor( &tree, NULL );
         return NULL;
     }
