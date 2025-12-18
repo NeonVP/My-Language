@@ -42,9 +42,6 @@ Node_t *SyntaxAnalyze( Parser_t* parser );
 void ParserDump( Parser_t *parser, const char *format_string, ... );
 #endif
 
-TreeData_t MakeNumber( int number );
-TreeData_t MakeOperation( OperationType operation );
-TreeData_t MakeVariable( char* variable );
 Node_t *MakeNode( OperationType op, Node_t *L, Node_t *R );
 
 int CompareDoubleToDouble( double a, double b, double eps );

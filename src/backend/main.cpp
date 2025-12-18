@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "backend/CodeGen.h"
 #include "Tree.h"
@@ -22,25 +21,24 @@ int main( int argc, char** argv ) {
 
     PRINT( "Backend: %s -> %s", input_file, output_file );
 
-    // Создаём генератор кода
     CodeGen_t* codegen = CodeGenCtor( input_file, output_file );
     if ( !codegen ) {
         PRINT_ERROR( "Failed to create code generator" );
         return 1;
     }
 
-    // Загружаем AST из файла
     codegen->tree = TreeLoadFromFile( input_file );
-    if ( !codegen->tree ) {
-        PRINT_ERROR( "Failed to load AST from file: %s", input_file );
-        CodeGenDtor( &codegen );
-        return 1;
-    }
+
+    TreeSaveToFile( codegen->tree, "tree_after_reading.txt" );
+    // if ( !codegen->tree ) {
+    //     PRINT_ERROR( "Failed to load AST from file: %s", input_file );
+    //     CodeGenDtor( &codegen );
+    //     return 1;
+    // }
 
     PRINT( "AST loaded successfully" );
 
-    // Генерируем ассемблерный код
-    GenerateCode( codegen );
+    // GenerateCode( codegen );
 
     PRINT( "Code generation successful" );
 

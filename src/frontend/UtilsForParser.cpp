@@ -27,14 +27,3 @@ TreeData_t MakeVariable( char* variable ) {
 
     return value;
 }
-
-int CompareDoubleToDouble( double a, double b, double eps ) {
-    if ( fabs( a - b ) < eps )
-        return 0;
-    if ( a - b > eps )
-        return 1;
-    if ( a - b < -eps )
-        return -1;
-
-    return 0;
-}

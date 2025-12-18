@@ -31,6 +31,7 @@
 // out           - вывод числа
 // hlt           - останов программы
 
+
 static void GenNode( CodeGen_t* codegen, Node_t* node );
 static void GenExpression( CodeGen_t* codegen, Node_t* node );
 static void GenFunction( CodeGen_t* codegen, Node_t* node );
