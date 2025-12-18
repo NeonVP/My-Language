@@ -70,6 +70,6 @@ Node_t* NodeCopy( Node_t* node );
 void NodeGraphicDump( const Node_t* node, const char* image_path_name, ... );
 
 void TreeSaveToFile( const Tree_t *tree, const char *filename );
-Tree_t* TreeLoadFromFile( const char *filename );
+Tree_t* TreeLoadFromFile( const char *filename, char *error_buffer, size_t error_size );
 
 #endif//TREE_H
