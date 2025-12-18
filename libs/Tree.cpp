@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include <sys/stat.h>
 
@@ -18,6 +19,12 @@ const uint32_t fill_color = 0xb6b4b4;
 static const char *operations_txt[] = { INIT_OPERATIONS( OPERATIONS_STRINGS ) };
 
 #undef OPERATIONS_STRINGS
+
+// Forward declarations for TreeLoadFromFile
+static Node_t* NodeLoadRecursively( const char **pos );
+static void SkipSpaces( const char **pos );
+static bool MatchString( const char **pos, const char *str );
+static int FindOperationType( const char *str );
 
 Tree_t *TreeCtor() {
     Tree_t *new_tree = (Tree_t *)calloc( 1, sizeof( *new_tree ) );
@@ -84,6 +91,11 @@ void NodeDelete( Node_t *node, Tree_t *tree, void ( *clean_function )( TreeData_
 
     if ( clean_function )
         clean_function( node->value, tree );
+
+    // Free variable strings
+    if ( node->value.type == NODE_VARIABLE && node->value.data.variable ) {
+        free( node->value.data.variable );
+    }
 
     free( node );
 }
@@ -344,4 +356,171 @@ void TreeSaveToFile( const Tree_t *tree, const char *filename ) {
     NodeSaveRecursively( tree->root, file_stream );
 
     fclose( file_stream );
+}
+
+// ========== TreeLoadFromFile implementation ==========
+
+static void SkipSpaces( const char **pos ) {
+    while ( **pos && isspace( (unsigned char)**pos ) ) {
+        (*pos)++;
+    }
+}
+
+static bool MatchString( const char **pos, const char *str ) {
+    size_t len = strlen( str );
+    if ( strncmp( *pos, str, len ) == 0 ) {
+        *pos += len;
+        return true;
+    }
+    return false;
+}
+
+static int FindOperationType( const char *str ) {
+    for ( int i = 0; i < sizeof(operations_txt) / sizeof(operations_txt[0]); i++ ) {
+        if ( strcmp( str, operations_txt[i] ) == 0 ) {
+            return i;
+        }
+    }
+    return OP_NOPE;
+}
+
+static Node_t* NodeLoadRecursively( const char **pos ) {
+    SkipSpaces( pos );
+
+    // Check for 'nil'
+    if ( MatchString( pos, "nil" ) ) {
+        return NULL;
+    }
+
+    // Expect '('
+    if ( **pos != '(' ) {
+        PRINT_ERROR( "Expected '(' at position, got '%c'", **pos );
+        return NULL;
+    }
+    (*pos)++;
+
+    SkipSpaces( pos );
+
+    // Create node
+    TreeData_t data = {};
+
+    // Parse node value
+    if ( **pos == '"' ) {
+        // Variable (string in quotes)
+        (*pos)++; // skip opening quote
+        const char *start = *pos;
+        while ( **pos && **pos != '"' ) {
+            (*pos)++;
+        }
+        if ( **pos != '"' ) {
+            PRINT_ERROR( "Unterminated string" );
+            return NULL;
+        }
+        
+        size_t len = *pos - start;
+        data.type = NODE_VARIABLE;
+        data.data.variable = (char*)calloc( len + 1, sizeof(char) );
+        strncpy( data.data.variable, start, len );
+        data.data.variable[len] = '\0';
+        
+        (*pos)++; // skip closing quote
+    }
+    else if ( isdigit( (unsigned char)**pos ) || **pos == '-' ) {
+        // Number
+        data.type = NODE_NUMBER;
+        char *end;
+        data.data.number = strtol( *pos, &end, 10 );
+        *pos = end;
+    }
+    else {
+        // Operation (read until space)
+        const char *start = *pos;
+        while ( **pos && !isspace( (unsigned char)**pos ) && **pos != ')' ) {
+            (*pos)++;
+        }
+        
+        size_t len = *pos - start;
+        char op_str[64] = {};
+        strncpy( op_str, start, len < 63 ? len : 63 );
+        
+        int op_type = FindOperationType( op_str );
+        if ( op_type == OP_NOPE ) {
+            PRINT_ERROR( "Unknown operation: %s", op_str );
+            return NULL;
+        }
+        
+        data.type = NODE_OPERATION;
+        data.data.operation = op_type;
+    }
+
+    Node_t *node = NodeCreate( data, NULL );
+    if ( !node ) {
+        PRINT_ERROR( "Failed to create node" );
+        if ( data.type == NODE_VARIABLE && data.data.variable ) {
+            free( data.data.variable );
+        }
+        return NULL;
+    }
+
+    SkipSpaces( pos );
+
+    // Parse left child
+    node->left = NodeLoadRecursively( pos );
+    if ( node->left ) {
+        node->left->parent = node;
+    }
+
+    SkipSpaces( pos );
+
+    // Parse right child
+    node->right = NodeLoadRecursively( pos );
+    if ( node->right ) {
+        node->right->parent = node;
+    }
+
+    SkipSpaces( pos );
+
+    // Expect ')'
+    if ( **pos != ')' ) {
+        PRINT_ERROR( "Expected ')' at position, got '%c'", **pos );
+        NodeDelete( node, NULL, NULL );
+        return NULL;
+    }
+    (*pos)++;
+
+    return node;
+}
+
+Tree_t* TreeLoadFromFile( const char *filename ) {
+    if ( !filename ) {
+        PRINT_ERROR( "Null pointer on `filename`" );
+        return NULL;
+    }
+
+    char *buffer = ReadToBuffer( filename );
+    if ( !buffer ) {
+        PRINT_ERROR( "Failed to read file `%s`", filename );
+        return NULL;
+    }
+
+    Tree_t *tree = TreeCtor();
+    if ( !tree ) {
+        PRINT_ERROR( "Failed to create tree" );
+        free( buffer );
+        return NULL;
+    }
+
+    const char *pos = buffer;
+    tree->root = NodeLoadRecursively( &pos );
+
+    free( buffer );
+
+    if ( !tree->root ) {
+        PRINT_ERROR( "Failed to parse tree from file" );
+        TreeDtor( &tree, NULL );
+        return NULL;
+    }
+
+    PRINT( "Successfully loaded tree from file `%s`", filename );
+    return tree;
 }
